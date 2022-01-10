@@ -1,7 +1,7 @@
 FBFF
 ====
 
-Fbff is a framebuffer/OSS media player using ffmpeg or libmpeg3.
+Fbff is a framebuffer/ALSA media player using ffmpeg or libmpeg3.
 
 USAGE
 =====

@@ -212,7 +212,7 @@ int ffs_sdec(struct ffs *ffs, char *buf, int blen, long *beg, long *end)
 	return 0;
 }
 
-static int ffs_bytespersample(ffs)
+static int ffs_bytespersample()
 {
 	return av_get_bytes_per_sample(FFS_SAMPLEFMT) *
 		av_get_channel_layout_nb_channels(FFS_CHLAYOUT);
@@ -239,7 +239,7 @@ int ffs_adec(struct ffs *ffs, void *buf, int blen)
 			continue;
 		out[0] = buf + rdec;
 		len = swr_convert(ffs->swrc,
-			out, (blen - rdec) / ffs_bytespersample(ffs),
+			out, (blen - rdec) / ffs_bytespersample(),
 			(void *) ffs->tmp->extended_data, ffs->tmp->nb_samples);
 		if (len > 0)
 			rdec += len * ffs_bytespersample(ffs);

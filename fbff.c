@@ -14,8 +14,8 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
-#include <sys/poll.h>
-#include <sys/soundcard.h>
+#include <poll.h>
+#include <alsa/asoundlib.h>
 #include <pthread.h>
 #include "ffs.h"
 #include "draw.h"
@@ -41,7 +41,8 @@ static int rjust, bjust;	/* justify video to screen right/bottom */
 
 static struct ffs *affs;	/* audio ffmpeg stream */
 static struct ffs *vffs;	/* video ffmpeg stream */
-static int afd;			/* oss fd */
+static char *adevice = "default";/* alsa playback device */
+static snd_pcm_t *ahandle;	/* alsa handle */
 static int vnum;		/* decoded video frame count */
 static long mark[256];		/* marks */
 
@@ -101,24 +102,32 @@ static void draw_frame(void *img, int linelen)
 	}
 }
 
-static int oss_open(void)
+static int alsa_open(void)
 {
-	int rate, ch, bps;
-	afd = open("/dev/dsp", O_WRONLY);
-	if (afd < 0)
+	int err;
+	if ((err = snd_pcm_open(&ahandle, adevice, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+		printf("Playback open error: %s\n", snd_strerror(err));
 		return 1;
-	ffs_ainfo(affs, &rate, &bps, &ch);
-	ioctl(afd, SOUND_PCM_WRITE_CHANNELS, &ch);
-	ioctl(afd, SOUND_PCM_WRITE_BITS, &bps);
-	ioctl(afd, SOUND_PCM_WRITE_RATE, &rate);
+	}
+	if ((err = snd_pcm_set_params(ahandle,
+					SND_PCM_FORMAT_S16,
+					SND_PCM_ACCESS_RW_INTERLEAVED,
+					2,
+					44100,
+					1,
+					500000)) < 0) {	/* 0.5sec */
+		printf("Playback open error: %s\n", snd_strerror(err));
+		return 1;
+	}
 	return 0;
 }
 
-static void oss_close(void)
+static void alsa_close(void)
 {
-	if (afd > 0)
-		close(afd);
-	afd = 0;
+	int err = snd_pcm_drain(ahandle);
+	if (err < 0)
+		printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
+	snd_pcm_close(ahandle);
 }
 
 /* audio buffers */
@@ -240,7 +249,7 @@ static void cmdinfo(void)
 	long pos = ffs_pos(ffs);
 	long percent = ffs_duration(ffs) ? pos * 10 / (ffs_duration(ffs) / 100) : 0;
 	printf("\r\33[K%c %3ld.%01ld%%  %3ld:%02ld.%01ld  (AV:%4d)     [%s] \r",
-		paused ? (afd < 0 ? '*' : ' ') : '>',
+		paused ? (ahandle ? '*' : ' ') : '>',
 		percent / 10, percent % 10,
 		pos / 60000, (pos % 60000) / 1000, (pos % 1000) / 100,
 		video && audio ? ffs_avdiff(vffs, affs) : 0,
@@ -310,10 +319,10 @@ static void cmdexec(void)
 		case ' ':
 		case 'p':
 			if (audio && paused)
-				if (oss_open())
+				if (alsa_open())
 					break;
 			if (audio && !paused)
-				oss_close();
+				alsa_close();
 			paused = !paused;
 			sync_cur = sync_cnt;
 			break;
@@ -415,8 +424,13 @@ static void *process_audio(void *dat)
 			a_reset = 0;
 			continue;
 		}
-		if (afd > 0) {
-			write(afd, a_buf[a_cons], a_len[a_cons]);
+		if (ahandle) {
+			int frames = snd_pcm_writei(ahandle, a_buf[a_cons], a_len[a_cons] / 4);
+			if (frames < 0) {
+				frames = snd_pcm_recover(ahandle, frames, 0);
+				printf("snd_pcm_writei failed: %s\n", snd_strerror(frames));
+			} else if (frames < a_len[a_cons] / 4)
+				printf("Short write (expected %d, wrote %d)\n", a_len[a_cons] / 4, frames);
 			a_cons = (a_cons + 1) & (ABUFCNT - 1);
 		}
 	}
@@ -520,11 +534,8 @@ int main(int argc, char *argv[])
 		sub_read();
 	if (audio) {
 		ffs_aconf(affs);
-		if (oss_open()) {
-			fprintf(stderr, "fbff: /dev/dsp busy?\n");
-			return 1;
-		}
-		pthread_create(&a_thread, NULL, process_audio, NULL);
+		if (!alsa_open())
+			pthread_create(&a_thread, NULL, process_audio, NULL);
 	}
 	if (video) {
 		int w, h;
@@ -549,7 +560,7 @@ int main(int argc, char *argv[])
 	}
 	if (audio) {
 		pthread_join(a_thread, NULL);
-		oss_close();
+		alsa_close();
 		ffs_free(affs);
 	}
 	return 0;
