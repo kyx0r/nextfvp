@@ -1,29 +1,40 @@
-FBFF
+Nextfvp
 ====
 
-Fbff is a framebuffer/ALSA media player using ffmpeg or libmpeg3.
+Nextfvp is a framebuffer/ALSA media player using ffmpeg or libmpeg3.
+
+Name
+====
+Next - (framebuffer video player)
+
+Changes
+=======
+Using ALSA instead of OSS
+Todo:
+- Update code to take advantage of ffpmeg 4.4+
+- Better use of threading.
 
 USAGE
 =====
 
 To start it simply run:
 
-  $ fbff file.sth
+  $ fvp file.sth
 
 When playing video files, audio and video may get out of sync.  So I
 suggest using this by default:
 
-  $ fbff -u -s file.sth
+  $ fvp -u -s file.sth
 
 And if that results in choppy playback, use:
 
-  $ fbff -u -s100 file.sth
+  $ fvp -u -s100 file.sth
 
 This means record A/V diff after the first few video frames (-u)
 and synchronize each 100 video frames (-s100).  This should work for
 most files.
 
-The following table describes fbff keybinding.  Most of these commands
+The following table describes fvp keybinding.  Most of these commands
 accept a numerical prefix.  The variable avdiff is used to synchronize
 audio and video streams.  The synchronization is done after the 's' key
 or the pause and seek commands.  '-', '+', and 'a' keys can be used to
@@ -52,7 +63,7 @@ c		set synchronization steps
 OPTIONS AND KEYS
 ================
 
-The following options can be specified when starting fbff:
+The following options can be specified when starting fvp:
 
 ==============	================================================
 OPTION		DESCRIPTION
