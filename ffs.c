@@ -1,19 +1,9 @@
-#include <fcntl.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libswresample/swresample.h>
-#include <libswscale/swscale.h>
-#include "ffs.h"
-
+#define FFS_AUDIO	0x1000
+#define FFS_VIDEO	0x2000
+#define FFS_SUBTS	0x4000
+#define FFS_STRIDX	0x0fff
 #define FFS_SAMPLEFMT		AV_SAMPLE_FMT_S16
 #define FFS_CHLAYOUT		AV_CH_LAYOUT_STEREO
-
-#define MAX(a, b)		((a) < (b) ? (b) : (a))
-#define MIN(a, b)		((a) < (b) ? (a) : (b))
 
 /* ffmpeg stream */
 struct ffs {
@@ -44,6 +34,23 @@ static int ffs_stype(int flags)
 	return 0;
 }
 
+void ffs_free(struct ffs *ffs)
+{
+	if (ffs->swrc)
+		swr_free(&ffs->swrc);
+	if (ffs->swsc)
+		sws_freeContext(ffs->swsc);
+	if (ffs->dst)
+		av_free(ffs->dst);
+	if (ffs->tmp)
+		av_free(ffs->tmp);
+	if (ffs->cc)
+		avcodec_close(ffs->cc);
+	if (ffs->fc)
+		avformat_close_input(&ffs->fc);
+	free(ffs);
+}
+
 struct ffs *ffs_alloc(char *path, int flags)
 {
 	struct ffs *ffs;
@@ -69,23 +76,6 @@ struct ffs *ffs_alloc(char *path, int flags)
 failed:
 	ffs_free(ffs);
 	return NULL;
-}
-
-void ffs_free(struct ffs *ffs)
-{
-	if (ffs->swrc)
-		swr_free(&ffs->swrc);
-	if (ffs->swsc)
-		sws_freeContext(ffs->swsc);
-	if (ffs->dst)
-		av_free(ffs->dst);
-	if (ffs->tmp)
-		av_free(ffs->tmp);
-	if (ffs->cc)
-		avcodec_close(ffs->cc);
-	if (ffs->fc)
-		avformat_close_input(&ffs->fc);
-	free(ffs);
 }
 
 static AVPacket *ffs_pkt(struct ffs *ffs)
@@ -116,7 +106,11 @@ static int wait(long ts, int vdelay)
 {
 	long nts = ts_ms();
 	if (nts > ts && ts + vdelay > nts) {
-		usleep((ts + vdelay - nts) * 1000);
+		struct timespec req;
+		req.tv_sec = 0;
+		req.tv_nsec = (ts + vdelay - nts) * 1000000;
+		struct timespec rem;
+		nanosleep(&req, &rem);
 		return 0;
 	}
 	return 1;
@@ -218,7 +212,7 @@ static int ffs_bytespersample()
 		av_get_channel_layout_nb_channels(FFS_CHLAYOUT);
 }
 
-int ffs_adec(struct ffs *ffs, void *buf, int blen)
+int ffs_adec(struct ffs *ffs, char *buf, int blen)
 {
 	int rdec = 0;
 	AVPacket tmppkt = {0};

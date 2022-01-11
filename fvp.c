@@ -1,7 +1,8 @@
 /*
- * fbff - a small ffmpeg-based framebuffer/oss media player
+ * fvp - a small ffmpeg-based framebuffer/alsa media player
  *
  * Copyright (C) 2009-2021 Ali Gholami Rudi
+ * Copyright (C) 2022-2023 Kyryl Melekhin
  *
  * This program is released under the Modified BSD license.
  */
@@ -17,11 +18,16 @@
 #include <poll.h>
 #include <alsa/asoundlib.h>
 #include <pthread.h>
-#include "ffs.h"
-#include "draw.h"
-
-#define MIN(a, b)	((a) < (b) ? (a) : (b))
-#define MAX(a, b)	((a) > (b) ? (a) : (b))
+#include <sys/time.h>
+#include <time.h>
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
+#include <linux/fb.h>
+#include <sys/mman.h>
+#include "draw.c"
+#include "ffs.c"
 
 static int paused;
 static int exited;
@@ -55,10 +61,14 @@ static int sync_first;		/* first frame to record sync_diff */
 
 static void stroll(void)
 {
-	usleep(10000);
+	struct timespec req;
+	req.tv_sec = 0;
+	req.tv_nsec = 10000000;
+	struct timespec rem;
+	nanosleep(&req, &rem);
 }
 
-static void draw_row(int rb, int cb, void *img, int cn)
+static void draw_row(int rb, int cb, char *img, int cn)
 {
 	int bpp = FBM_BPP(fb_mode());
 	if (rb < 0 || rb >= fb_rows())
@@ -73,7 +83,7 @@ static void draw_row(int rb, int cb, void *img, int cn)
 	memcpy(fb_mem(rb) + cb * bpp, img, cn * bpp);
 }
 
-static void draw_frame(void *img, int linelen)
+static void draw_frame(char *img, int linelen)
 {
 	int w, h, rn, cn, cb, rb;
 	int i, r, c, k;
