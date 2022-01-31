@@ -190,13 +190,12 @@ static int alsa_open(void)
 static void alsa_close(void)
 {
 	exited = 1;
-	snd_pcm_t *_ahandle = ahandle;
-	ahandle = NULL;
+	a_reset = 1;
 	pthread_join(a_thread, NULL);
-	int err = snd_pcm_drain(_ahandle);
+	int err = snd_pcm_drain(ahandle);
 	if (err < 0)
 		printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
-	snd_pcm_close(_ahandle);
+	snd_pcm_close(ahandle);
 	exited = 0;
 }
 
@@ -449,7 +448,6 @@ static void mainloop(void)
 			stroll();
 		}
 	}
-	exited = 1;
 }
 
 static char *usage = "usage: fbff [options] file\n"
@@ -564,8 +562,6 @@ int main(int argc, char *argv[])
 	}
 	term_init(&termios);
 	mainloop();
-	term_done(&termios);
-	printf("\n");
 
 	if (video) {
 		fb_free();
@@ -575,5 +571,7 @@ int main(int argc, char *argv[])
 		alsa_close();
 		ffs_free(affs);
 	}
+	term_done(&termios);
+	printf("\n");
 	return 0;
 }
