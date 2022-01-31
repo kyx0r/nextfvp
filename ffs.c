@@ -231,7 +231,7 @@ int ffs_adec(struct ffs *ffs, char *buf, int blen)
 		tmppkt.data += len;
 		if (size <= 0)
 			continue;
-		out[0] = buf + rdec;
+		out[0] = (uint8_t*)buf + rdec;
 		len = swr_convert(ffs->swrc,
 			out, (blen - rdec) / ffs_bytespersample(),
 			(void *) ffs->tmp->extended_data, ffs->tmp->nb_samples);

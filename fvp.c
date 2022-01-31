@@ -49,6 +49,7 @@ static struct ffs *affs;	/* audio ffmpeg stream */
 static struct ffs *vffs;	/* video ffmpeg stream */
 static char *adevice = "default";/* alsa playback device */
 static snd_pcm_t *ahandle;	/* alsa handle */
+static pthread_t a_thread;	/* alsa thread */
 static int vnum;		/* decoded video frame count */
 static long mark[256];		/* marks */
 
@@ -112,34 +113,6 @@ static void draw_frame(char *img, int linelen)
 	}
 }
 
-static int alsa_open(void)
-{
-	int err;
-	if ((err = snd_pcm_open(&ahandle, adevice, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-		printf("Playback open error: %s\n", snd_strerror(err));
-		return 1;
-	}
-	if ((err = snd_pcm_set_params(ahandle,
-					SND_PCM_FORMAT_S16,
-					SND_PCM_ACCESS_RW_INTERLEAVED,
-					2,
-					44100,
-					1,
-					500000)) < 0) {	/* 0.5sec */
-		printf("Playback open error: %s\n", snd_strerror(err));
-		return 1;
-	}
-	return 0;
-}
-
-static void alsa_close(void)
-{
-	int err = snd_pcm_drain(ahandle);
-	if (err < 0)
-		printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
-	snd_pcm_close(ahandle);
-}
-
 /* audio buffers */
 
 #define ABUFCNT		(1 << 3)	/* number of audio buffers */
@@ -166,6 +139,65 @@ static void a_doreset(int pause)
 	a_reset = 1 + pause;
 	while (audio && a_reset)
 		stroll();
+}
+
+static void *process_audio(void *dat)
+{
+	while (!exited) {
+		while (!a_reset && (a_conswait() || paused))
+			stroll();
+		if (a_reset) {
+			if (a_reset == 1)
+				a_cons = a_prod;
+			a_reset = 0;
+			continue;
+		}
+		if (ahandle) {
+			/* period of 4 */
+			int frames = snd_pcm_writei(ahandle, a_buf[a_cons], a_len[a_cons] / 4);
+			if (frames < 0) {
+				frames = snd_pcm_recover(ahandle, frames, 0);
+				printf("snd_pcm_writei failed: %s\n", snd_strerror(frames));
+			} else if (frames < a_len[a_cons] / 4)
+				printf("Short write (expected %d, wrote %d)\n", a_len[a_cons] / 4, frames);
+			a_cons = (a_cons + 1) & (ABUFCNT - 1);
+		}
+	}
+	return NULL;
+}
+
+static int alsa_open(void)
+{
+	int err;
+	if ((err = snd_pcm_open(&ahandle, adevice, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+		printf("Playback open error: %s\n", snd_strerror(err));
+		return 1;
+	}
+	if ((err = snd_pcm_set_params(ahandle,
+					SND_PCM_FORMAT_S16,
+					SND_PCM_ACCESS_RW_INTERLEAVED,
+					2,
+					44100,
+					1,
+					500000)) < 0) {	/* 0.5sec */
+		printf("Playback open error: %s\n", snd_strerror(err));
+		return 1;
+	}
+	pthread_create(&a_thread, NULL, process_audio, NULL);
+	return 0;
+}
+
+static void alsa_close(void)
+{
+	exited = 1;
+	snd_pcm_t *_ahandle = ahandle;
+	ahandle = NULL;
+	pthread_join(a_thread, NULL);
+	int err = snd_pcm_drain(_ahandle);
+	if (err < 0)
+		printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
+	snd_pcm_close(_ahandle);
+	exited = 0;
 }
 
 /* subtitle handling */
@@ -328,10 +360,10 @@ static void cmdexec(void)
 			break;
 		case ' ':
 		case 'p':
-			if (audio && paused)
+			if (audio && paused) {
 				if (alsa_open())
 					break;
-			if (audio && !paused)
+			} else if (audio && !paused)
 				alsa_close();
 			paused = !paused;
 			sync_cur = sync_cnt;
@@ -391,7 +423,6 @@ static void mainloop(void)
 		if (exited)
 			break;
 		if (paused) {
-			a_doreset(1);
 			cmdwait();
 			continue;
 		}
@@ -419,32 +450,6 @@ static void mainloop(void)
 		}
 	}
 	exited = 1;
-}
-
-static void *process_audio(void *dat)
-{
-	while (1) {
-		while (!a_reset && (a_conswait() || paused) && !exited)
-			stroll();
-		if (exited)
-			return NULL;
-		if (a_reset) {
-			if (a_reset == 1)
-				a_cons = a_prod;
-			a_reset = 0;
-			continue;
-		}
-		if (ahandle) {
-			int frames = snd_pcm_writei(ahandle, a_buf[a_cons], a_len[a_cons] / 4);
-			if (frames < 0) {
-				frames = snd_pcm_recover(ahandle, frames, 0);
-				printf("snd_pcm_writei failed: %s\n", snd_strerror(frames));
-			} else if (frames < a_len[a_cons] / 4)
-				printf("Short write (expected %d, wrote %d)\n", a_len[a_cons] / 4, frames);
-			a_cons = (a_cons + 1) & (ABUFCNT - 1);
-		}
-	}
-	return NULL;
 }
 
 static char *usage = "usage: fbff [options] file\n"
@@ -525,7 +530,6 @@ static void term_done(struct termios *termios)
 int main(int argc, char *argv[])
 {
 	struct termios termios;
-	pthread_t a_thread;
 	char *path = argv[argc - 1];
 	if (argc < 2) {
 		printf("usage: %s [-u -s60 ...] file\n", argv[0]);
@@ -544,8 +548,7 @@ int main(int argc, char *argv[])
 		sub_read();
 	if (audio) {
 		ffs_aconf(affs);
-		if (!alsa_open())
-			pthread_create(&a_thread, NULL, process_audio, NULL);
+		alsa_open();
 	}
 	if (video) {
 		int w, h;
@@ -569,7 +572,6 @@ int main(int argc, char *argv[])
 		ffs_free(vffs);
 	}
 	if (audio) {
-		pthread_join(a_thread, NULL);
 		alsa_close();
 		ffs_free(affs);
 	}
