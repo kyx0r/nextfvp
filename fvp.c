@@ -568,7 +568,8 @@ int main(int argc, char *argv[])
 		ffs_free(vffs);
 	}
 	if (audio) {
-		alsa_close();
+		if (!paused)
+			alsa_close();
 		ffs_free(affs);
 	}
 	term_done(&termios);
