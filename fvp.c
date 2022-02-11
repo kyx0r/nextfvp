@@ -192,9 +192,11 @@ static void alsa_close(void)
 	exited = 1;
 	a_reset = 1;
 	pthread_join(a_thread, NULL);
-	int err = snd_pcm_drain(ahandle);
-	if (err < 0)
-		printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
+	if (paused) {
+		int err = snd_pcm_drain(ahandle);
+		if (err < 0)
+			printf("snd_pcm_drain failed: %s\n", snd_strerror(err));
+	}
 	snd_pcm_close(ahandle);
 	exited = 0;
 }
