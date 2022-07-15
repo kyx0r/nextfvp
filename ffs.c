@@ -66,7 +66,7 @@ struct ffs *ffs_alloc(char *path, int flags)
 	if (ffs->si < 0)
 		goto failed;
 	ffs->st = ffs->fc->streams[ffs->si];
-	AVCodec *dec = avcodec_find_decoder(ffs->st->codecpar->codec_id);
+	const AVCodec *dec = avcodec_find_decoder(ffs->st->codecpar->codec_id);
 	ffs->cc = avcodec_alloc_context3(dec);
 	avcodec_parameters_to_context(ffs->cc, ffs->st->codecpar);
 	if (avcodec_open2(ffs->cc, dec, NULL))

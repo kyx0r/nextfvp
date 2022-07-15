@@ -10,9 +10,7 @@ Next - (framebuffer video player)
 Changes
 =======
 Using ALSA instead of OSS
-Todo:
-- Update code to take advantage of ffpmeg 4.4+
-- Better use of threading.
+Updated code to take advantage of ffmpeg 4.4+
 
 USAGE
 =====
