@@ -24,6 +24,7 @@
 #include <libavformat/avformat.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
 #include <linux/fb.h>
 #include <sys/mman.h>
 #include "draw.c"

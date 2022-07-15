@@ -55,7 +55,6 @@ struct ffs *ffs_alloc(char *path, int flags)
 {
 	struct ffs *ffs;
 	int idx = (flags & FFS_STRIDX) - 1;
-	AVDictionary *opt = NULL;
 	ffs = malloc(sizeof(*ffs));
 	memset(ffs, 0, sizeof(*ffs));
 	ffs->si = -1;
@@ -66,10 +65,12 @@ struct ffs *ffs_alloc(char *path, int flags)
 	ffs->si = av_find_best_stream(ffs->fc, ffs_stype(flags), idx, -1, NULL, 0);
 	if (ffs->si < 0)
 		goto failed;
-	ffs->cc = ffs->fc->streams[ffs->si]->codec;
-	if (avcodec_open2(ffs->cc, avcodec_find_decoder(ffs->cc->codec_id), &opt))
-		goto failed;
 	ffs->st = ffs->fc->streams[ffs->si];
+	AVCodec *dec = avcodec_find_decoder(ffs->st->codecpar->codec_id);
+	ffs->cc = avcodec_alloc_context3(dec);
+	avcodec_parameters_to_context(ffs->cc, ffs->st->codecpar);
+	if (avcodec_open2(ffs->cc, dec, NULL))
+		goto failed;
 	ffs->tmp = av_frame_alloc();
 	ffs->dst = av_frame_alloc();
 	return ffs;
@@ -90,7 +91,7 @@ static AVPacket *ffs_pkt(struct ffs *ffs)
 				ffs->pts = pts;
 			return pkt;
 		}
-		av_free_packet(pkt);
+		av_packet_unref(pkt);
 	}
 	return NULL;
 }
@@ -160,12 +161,14 @@ int ffs_vdec(struct ffs *ffs, void **buf)
 {
 	AVCodecContext *vcc = ffs->cc;
 	AVPacket *pkt = ffs_pkt(ffs);
-	int fine = 0;
 	if (!pkt)
 		return -1;
-	avcodec_decode_video2(vcc, ffs->tmp, &fine, pkt);
-	av_free_packet(pkt);
-	if (fine && buf) {
+	if (avcodec_send_packet(vcc, pkt) < 0)
+		return 0;
+	if (avcodec_receive_frame(vcc, ffs->tmp) < 0)
+		return 0;
+	av_packet_unref(pkt);
+	if (buf) {
 		sws_scale(ffs->swsc, (void *) ffs->tmp->data, ffs->tmp->linesize,
 			  0, vcc->height, ffs->dst->data, ffs->dst->linesize);
 		*buf = (void *) ffs->dst->data[0];
@@ -184,7 +187,7 @@ int ffs_sdec(struct ffs *ffs, char *buf, int blen, long *beg, long *end)
 	if (!pkt)
 		return -1;
 	avcodec_decode_subtitle2(ffs->cc, &sub, &fine, pkt);
-	av_free_packet(pkt);
+	av_packet_unref(pkt);
 	buf[0] = '\0';
 	if (!fine)
 		return 1;
@@ -222,15 +225,14 @@ int ffs_adec(struct ffs *ffs, char *buf, int blen)
 		return -1;
 	tmppkt.size = pkt->size;
 	tmppkt.data = pkt->data;
+	if (avcodec_send_packet(ffs->cc, &tmppkt) < 0)
+		return -1;
 	while (tmppkt.size > 0) {
-		int len, size;
-		len = avcodec_decode_audio4(ffs->cc, ffs->tmp, &size, &tmppkt);
-		if (len < 0)
+		if (avcodec_receive_frame(ffs->cc, ffs->tmp) < 0)
 			break;
+	        int len = av_get_bytes_per_sample(ffs->cc->sample_fmt);
 		tmppkt.size -= len;
 		tmppkt.data += len;
-		if (size <= 0)
-			continue;
 		out[0] = (uint8_t*)buf + rdec;
 		len = swr_convert(ffs->swrc,
 			out, (blen - rdec) / ffs_bytespersample(),
@@ -238,7 +240,7 @@ int ffs_adec(struct ffs *ffs, char *buf, int blen)
 		if (len > 0)
 			rdec += len * ffs_bytespersample(ffs);
 	}
-	av_free_packet(pkt);
+	av_packet_unref(pkt);
 	return rdec;
 }
 
@@ -268,9 +270,10 @@ void ffs_vconf(struct ffs *ffs, float zoom, int fbm)
 	ffs->swsc = sws_getContext(w, h, fmt, w * zoom, h * zoom,
 			pixfmt, SWS_FAST_BILINEAR,
 			NULL, NULL, NULL);
-	n = avpicture_get_size(pixfmt, w * zoom, h * zoom);
+	n = av_image_get_buffer_size(pixfmt, w * zoom, h * zoom, 16);
 	buf = av_malloc(n * sizeof(uint8_t));
-	avpicture_fill((AVPicture *) ffs->dst, buf, pixfmt, w * zoom, h * zoom);
+	av_image_fill_arrays(ffs->dst->data, ffs->dst->linesize, buf, pixfmt,
+				w * zoom, h * zoom, 1);
 }
 
 void ffs_aconf(struct ffs *ffs)
@@ -286,7 +289,6 @@ void ffs_aconf(struct ffs *ffs)
 
 void ffs_globinit(void)
 {
-	av_register_all();
 	avformat_network_init();
 }
 
