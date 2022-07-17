@@ -398,6 +398,8 @@ static void cmdexec(void)
 /* return nonzero if one more video frame can be decoded */
 static int vsync(void)
 {
+	if (!audio)
+		goto ts_chk;
 	if (sync_period && sync_since++ >= sync_period) {
 		sync_cur = sync_cnt;
 		sync_since = 0;
@@ -413,6 +415,7 @@ static int vsync(void)
 		sync_cur--;
 		return ffs_avdiff(vffs, affs) >= sync_diff;
 	}
+	ts_chk:
 	ffs_wait(vffs);
 	return 1;
 }
@@ -437,7 +440,7 @@ static void mainloop(void)
 				a_prod = (a_prod + 1) & (ABUFCNT - 1);
 			}
 		}
-		if (video && (!audio || eof || vsync())) {
+		if (video && (eof || vsync())) {
 			int ignore = jump && (vnum % (jump + 1));
 			void *buf;
 			int ret = ffs_vdec(vffs, ignore ? NULL : &buf);
