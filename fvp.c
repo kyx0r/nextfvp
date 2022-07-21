@@ -529,6 +529,7 @@ static void term_init(struct termios *termios)
 static void term_done(struct termios *termios)
 {
 	tcsetattr(0, 0, termios);
+	fcntl(0, F_SETFL, fcntl(0, F_GETFL) & ~O_NONBLOCK);
 }
 
 int main(int argc, char *argv[])
