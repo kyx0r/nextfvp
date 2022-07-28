@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <time.h>
+#include <signal.h>
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswresample/swresample.h>
@@ -532,6 +533,14 @@ static void term_done(struct termios *termios)
 	fcntl(0, F_SETFL, fcntl(0, F_GETFL) & ~O_NONBLOCK);
 }
 
+static void signalreceived(int n)
+{
+	if (n == SIGINT || n == SIGTERM) {
+		exited = 1;
+		printf("\nsignal %d", n);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	struct termios termios;
@@ -568,8 +577,9 @@ int main(int argc, char *argv[])
 		ffs_vconf(vffs, zoom, fb_mode());
 	}
 	term_init(&termios);
+	signal(SIGINT, signalreceived);
+	signal(SIGTERM, signalreceived);
 	mainloop();
-
 	if (video) {
 		fb_free();
 		ffs_free(vffs);
