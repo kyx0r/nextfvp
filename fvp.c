@@ -124,7 +124,6 @@ static int a_cons;
 static int a_prod;
 static char a_buf[ABUFCNT][ABUFLEN];
 static int a_len[ABUFCNT];
-static int a_reset;
 
 static int a_conswait(void)
 {
@@ -136,24 +135,11 @@ static int a_prodwait(void)
 	return ((a_prod + 1) & (ABUFCNT - 1)) == a_cons;
 }
 
-static void a_doreset(int pause)
-{
-	a_reset = 1 + pause;
-	while (audio && a_reset)
-		stroll();
-}
-
 static void *process_audio(void *dat)
 {
 	while (!exited) {
-		while (!a_reset && (a_conswait() || paused))
+		while (!exited && (a_conswait() || paused))
 			stroll();
-		if (a_reset) {
-			if (a_reset == 1)
-				a_cons = a_prod;
-			a_reset = 0;
-			continue;
-		}
 		if (ahandle) {
 			/* period of 4 */
 			int frames = snd_pcm_writei(ahandle, a_buf[a_cons], a_len[a_cons] / 4);
@@ -192,7 +178,6 @@ static int alsa_open(void)
 static void alsa_close(void)
 {
 	exited = 1;
-	a_reset = 1;
 	pthread_join(a_thread, NULL);
 	if (paused) {
 		int err = snd_pcm_drain(ahandle);
@@ -276,10 +261,11 @@ static void cmdjmp(int n, int rel)
 {
 	struct ffs *ffs = video ? vffs : affs;
 	long pos = (rel ? ffs_pos(ffs) : 0) + n * 1000;
-	a_doreset(0);
 	sync_cur = sync_cnt;
 	if (pos < 0)
 		pos = 0;
+	else if (pos >= ffs_duration(ffs))
+		exited = 1;
 	if (!rel)
 		mark['\''] = ffs_pos(ffs);
 	if (audio)
@@ -423,37 +409,35 @@ static int vsync(void)
 
 static void mainloop(void)
 {
-	int eof = 0;
-	while (eof < audio + video) {
+	int ret = 0;
+	while (ret >= 0) {
 		cmdexec();
 		if (exited)
-			break;
+			return;
 		if (paused) {
 			cmdwait();
 			continue;
 		}
-		while (audio && !eof && !a_prodwait()) {
-			int ret = ffs_adec(affs, a_buf[a_prod], ABUFLEN);
-			if (ret < 0)
-				eof++;
+		while (audio && !a_prodwait()) {
+			ret = ffs_adec(affs, a_buf[a_prod], ABUFLEN);
 			if (ret > 0) {
 				a_len[a_prod] = ret;
 				a_prod = (a_prod + 1) & (ABUFCNT - 1);
-			}
+			} else
+				break;
 		}
-		if (video && (eof || vsync())) {
+		if (video && vsync()) {
 			int ignore = jump && (vnum % (jump + 1));
 			void *buf;
-			int ret = ffs_vdec(vffs, ignore ? NULL : &buf);
+			ret = ffs_vdec(vffs, ignore ? NULL : &buf);
 			vnum++;
-			if (ret < 0)
-				eof++;
-			if (ret > 0)
+			if (ret > 0) {
 				draw_frame((void *) buf, ret);
-			sub_print();
-		} else {
-			stroll();
+				sub_print();
+			}
+			continue;
 		}
+		stroll();
 	}
 }
 
@@ -536,8 +520,10 @@ static void term_done(struct termios *termios)
 static void signalreceived(int n)
 {
 	if (n == SIGINT || n == SIGTERM) {
-		exited = 1;
 		printf("\nsignal %d", n);
+		if (exited > 1)
+			exit(1);
+		exited++;
 	}
 }
 
