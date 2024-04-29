@@ -33,6 +33,7 @@
 
 static int paused;
 static int exited;
+static int retcode;
 static int domark;
 static int dojump;
 static int arg;
@@ -524,6 +525,7 @@ static void signalreceived(int n)
 		if (exited > 1)
 			exit(1);
 		exited++;
+		retcode = n + 128;
 	}
 }
 
@@ -577,5 +579,5 @@ int main(int argc, char *argv[])
 	}
 	term_done(&termios);
 	printf("\n");
-	return 0;
+	return retcode;
 }
