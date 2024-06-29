@@ -1,7 +1,7 @@
 Nextfvp
 ====
 
-Nextfvp is a framebuffer/ALSA media player using ffmpeg or libmpeg3.
+Nextfvp is a framebuffer/ALSA media player using ffmpeg.
 
 Name
 ====
@@ -10,7 +10,7 @@ Next - (framebuffer video player)
 Changes
 =======
 Using ALSA instead of OSS
-Updated code to take advantage of ffmpeg 4.4+
+Updated code to take advantage of ffmpeg 7.0+
 
 USAGE
 =====

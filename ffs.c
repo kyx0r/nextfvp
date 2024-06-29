@@ -3,7 +3,7 @@
 #define FFS_SUBTS	0x4000
 #define FFS_STRIDX	0x0fff
 #define FFS_SAMPLEFMT		AV_SAMPLE_FMT_S16
-#define FFS_CHLAYOUT		AV_CH_LAYOUT_STEREO
+//#define FFS_CHLAYOUT		AV_CHANNEL_LAYOUT_STEREO
 
 /* ffmpeg stream */
 struct ffs {
@@ -45,7 +45,7 @@ void ffs_free(struct ffs *ffs)
 	if (ffs->tmp)
 		av_free(ffs->tmp);
 	if (ffs->cc)
-		avcodec_close(ffs->cc);
+		avcodec_free_context(&ffs->cc);
 	if (ffs->fc)
 		avformat_close_input(&ffs->fc);
 	free(ffs);
@@ -150,13 +150,6 @@ void ffs_vinfo(struct ffs *ffs, int *w, int *h)
 	*w = ffs->cc->width;
 }
 
-void ffs_ainfo(struct ffs *ffs, int *rate, int *bps, int *ch)
-{
-	*rate = ffs->cc->sample_rate;
-	*ch = av_get_channel_layout_nb_channels(FFS_CHLAYOUT);
-	*bps = 16;
-}
-
 int ffs_vdec(struct ffs *ffs, void **buf)
 {
 	AVCodecContext *vcc = ffs->cc;
@@ -209,10 +202,9 @@ int ffs_sdec(struct ffs *ffs, char *buf, int blen, long *beg, long *end)
 	return 0;
 }
 
-static int ffs_bytespersample()
+static int ffs_bytespersample(struct ffs *ffs)
 {
-	return av_get_bytes_per_sample(FFS_SAMPLEFMT) *
-		av_get_channel_layout_nb_channels(FFS_CHLAYOUT);
+	return av_get_bytes_per_sample(FFS_SAMPLEFMT) * ffs->cc->ch_layout.nb_channels;
 }
 
 int ffs_adec(struct ffs *ffs, char *buf, int blen)
@@ -235,7 +227,7 @@ int ffs_adec(struct ffs *ffs, char *buf, int blen)
 		tmppkt.data += len;
 		out[0] = (uint8_t*)buf + rdec;
 		len = swr_convert(ffs->swrc,
-			out, (blen - rdec) / ffs_bytespersample(),
+			out, (blen - rdec) / ffs_bytespersample(ffs),
 			(void *) ffs->tmp->extended_data, ffs->tmp->nb_samples);
 		if (len > 0)
 			rdec += len * ffs_bytespersample(ffs);
@@ -278,12 +270,14 @@ void ffs_vconf(struct ffs *ffs, float zoom, int fbm)
 
 void ffs_aconf(struct ffs *ffs)
 {
-	int rate, bps, ch;
-	ffs_ainfo(ffs, &rate, &bps, &ch);
-	ffs->swrc = swr_alloc_set_opts(NULL,
-		FFS_CHLAYOUT, FFS_SAMPLEFMT, rate,
-		ffs->cc->channel_layout, ffs->cc->sample_fmt, ffs->cc->sample_rate,
+	int ret = swr_alloc_set_opts2(&ffs->swrc,
+		&ffs->cc->ch_layout, FFS_SAMPLEFMT, ffs->cc->sample_rate,
+		&ffs->cc->ch_layout, ffs->cc->sample_fmt, ffs->cc->sample_rate,
 		0, NULL);
+	if (ret < 0) {
+		fprintf(stderr, "ffs: swr_alloc_set_opts2 error\n");
+		return;
+	}
 	swr_init(ffs->swrc);
 }
 
